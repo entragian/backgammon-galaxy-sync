@@ -1,0 +1,5 @@
+node_modules/
+matches/
+package-lock.json
+.session.json
+.claude/

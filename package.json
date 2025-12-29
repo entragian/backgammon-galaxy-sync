@@ -1,0 +1,26 @@
+{
+  "name": "backgammon-galaxy-sync",
+  "version": "1.0.0",
+  "description": "Download Backgammon Galaxy matches for ExtremeGammon analysis",
+  "main": "sync.js",
+  "bin": "sync.js",
+  "scripts": {
+    "sync": "node sync.js",
+    "build": "pkg . --targets node18-win-x64 --output dist/BackgammonSync.exe"
+  },
+  "pkg": {
+    "assets": [],
+    "outputPath": "dist"
+  },
+  "keywords": [
+    "backgammon",
+    "extremegammon"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.57.0"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}
