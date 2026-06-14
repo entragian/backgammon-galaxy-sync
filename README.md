@@ -68,7 +68,8 @@ If you import `/auth` without Playwright installed, the sign-in call throws a cl
 | Export | Description |
 | --- | --- |
 | `createClient({ getToken, baseUrl?, fetchImpl?, requestDelayMs? })` | Returns `{ getProfile, matches, fetchMat }`. Retries 5xx/network errors, honors `Retry-After` on 429, and forces one token refresh on 401. |
-| `findNewMatches(client, { isKnown })` | Async generator. Walks the match list newest-first and yields each **new** list entry, stopping at the first `isKnown(matchId)` hit. I/O-free; yields metadata, not fetched `.mat`. |
+| `findNewMatches(client, { isKnown })` | Async generator. Walks the list newest-first and yields each **new** entry, stopping at the first `isKnown(matchId)` hit. Fast incremental check; assumes no gaps. I/O-free; yields metadata, not fetched `.mat`. |
+| `findMissingMatches(client, { isKnown })` | Async generator. Scans the **whole** list and yields **every** entry not in your known set — no early stop. Resumes an interrupted sync and backfills gaps from failed downloads. This is what the CLI uses. |
 | `AuthError`, `HttpError`, `NetworkError`, `RateLimitError` | Typed errors you can branch on (each carries `.status` where relevant). |
 
 **`client` methods**
@@ -85,10 +86,11 @@ If you import `/auth` without Playwright installed, the sign-in call throws a cl
 | --- | --- |
 | `createBrowserAuth({ sessionFile, loginUrl, log? })` | Returns `{ getToken }`. Reuses a saved session, opens Edge (falls back to Chromium) for sign-in, and persists the session. |
 
-> **Note on `findNewMatches` early-stop.** It assumes your known set is a contiguous
-> newest-first prefix: it stops at the first already-seen match, so a match deleted from the
-> *middle* of your local history won't be re-fetched. If you need a full re-scan, iterate
-> `client.matches()` directly.
+> **`findNewMatches` vs `findMissingMatches`.** `findNewMatches` stops at the first
+> already-seen match — fast, but it assumes your known set is a contiguous newest-first prefix,
+> so a gap (a failed or deleted match in the middle) won't be re-fetched. `findMissingMatches`
+> scans the whole list and re-fetches any gap, at the cost of reading every page each run. The
+> CLI uses `findMissingMatches` so re-runs always converge to a complete download.
 
 > **Note on list metadata.** `matches()` / `findNewMatches` yield the raw list entry, so any
 > fields the API returns per match are exposed untouched. The exact set of fields isn't yet
@@ -116,8 +118,11 @@ npm install playwright   # the CLI signs in via a browser
 node sync.js
 ```
 
-The CLI saves your session (no repeat login), downloads only matches you don't already have,
-and writes each as `matchN.txt` via an atomic write (no half-written files on Ctrl-C).
+The CLI saves your session (no repeat login), then **re-syncs completely**: it downloads every
+match you don't already have — including gaps left by past failures or an interrupted run —
+several at a time, writing each as `matchN.txt` via an atomic write (no half-written files on
+Ctrl-C). Matches that fail (occasional server-side 500s) are listed at the end; just re-run to
+retry them.
 
 ### Importing to ExtremeGammon
 

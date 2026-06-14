@@ -15,11 +15,12 @@ const {
   NetworkError,
   RateLimitError,
 } = require('./lib/client');
-const { findNewMatches } = require('./lib/discovery');
+const { findNewMatches, findMissingMatches } = require('./lib/discovery');
 
 module.exports = {
   createClient,
   findNewMatches,
+  findMissingMatches,
   AuthError,
   HttpError,
   NetworkError,

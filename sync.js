@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const { createClient, findNewMatches } = require('./index');
+const { createClient, findMissingMatches } = require('./index');
 const { createBrowserAuth } = require('./lib/browser-auth');
 
 const BASE_URL = 'play.backgammongalaxy.com';
@@ -25,6 +25,7 @@ const CONFIG = {
   baseUrl: BASE_URL,
   loginUrl: `https://${BASE_URL}/`,
   sessionFile: path.join(__dirname, '.session.json'),
+  concurrency: 4,
 };
 
 function getExistingMatchIds(outputDir) {
@@ -67,13 +68,36 @@ function printBanner(log, title, lines) {
   log(rule);
 }
 
+// Run `worker(item)` over `items` with at most `concurrency` in flight. Workers
+// pull from a shared cursor; in single-threaded JS the cursor increment and the
+// counters the workers touch are race-free.
+async function runPool(items, concurrency, worker) {
+  let cursor = 0;
+  async function loop() {
+    while (cursor < items.length) {
+      await worker(items[cursor++]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, loop)
+  );
+}
+
 /**
- * Discover and download new matches. Pure consumer logic over an injected
- * client, so it can be exercised offline with a fake client + temp dir.
+ * Sync missing matches: a full newest-first scan for everything not on disk,
+ * then download those concurrently. A full scan (not an early-stop) is what makes
+ * re-runs resume interrupted downloads and retry past failures. Pure consumer
+ * logic over an injected client, so it runs offline with a fake client + temp dir.
  *
- * @returns {Promise<{ downloaded: number, errors: number, total: number, newMatchIds: number[] }>}
+ * @returns {Promise<{ downloaded:number, errors:number, total:number, missingIds:number[], failedIds:number[] }>}
  */
-async function downloadNewMatches({ client, outputDir, existingIds, log = console.log }) {
+async function downloadNewMatches({
+  client,
+  outputDir,
+  existingIds,
+  log = console.log,
+  concurrency = 4,
+}) {
   log('\n[2/3] Fetching match list...');
   log(`     ${existingIds.size} matches already downloaded`);
 
@@ -81,61 +105,71 @@ async function downloadNewMatches({ client, outputDir, existingIds, log = consol
   log(`     User: ${profile.userName}`);
   log(`     Total pages available: ${profile.totalPages}`);
 
-  // Newest-first scan via the library's discovery helper: it yields new matches
-  // and stops at the first one we already have (everything older is on disk).
-  const newMatchIds = [];
-  for await (const analysis of findNewMatches(client, { isKnown: id => existingIds.has(id) })) {
-    newMatchIds.push(analysis.matchId);
-    process.stdout.write(`\r     Scanning... (${newMatchIds.length} new matches found)`);
+  // Full newest-first scan: yield every match we don't already have (no early
+  // stop), so gaps from past failures and interrupted runs are picked back up.
+  const missingIds = [];
+  for await (const analysis of findMissingMatches(client, { isKnown: id => existingIds.has(id) })) {
+    missingIds.push(analysis.matchId);
+    process.stdout.write(`\r     Scanning... (${missingIds.length} to download)`);
   }
   log('');
-  log(`     Already saved: ${existingIds.size} | New: ${newMatchIds.length}`);
+  log(`     Already saved: ${existingIds.size} | To download: ${missingIds.length}`);
 
-  if (newMatchIds.length === 0) {
+  if (missingIds.length === 0) {
     printBanner(log, 'ALL UP TO DATE!', [
       `  Total matches saved:     ${existingIds.size}`,
     ]);
     printFooter(outputDir, log);
-    return { downloaded: 0, errors: 0, total: existingIds.size, newMatchIds };
+    return { downloaded: 0, errors: 0, total: existingIds.size, missingIds, failedIds: [] };
   }
 
-  log(`\n[3/3] Downloading ${newMatchIds.length} new matches...`);
+  log(`\n[3/3] Downloading ${missingIds.length} matches (${concurrency} at a time)...`);
   const startTime = Date.now();
   let downloaded = 0;
   let errors = 0;
+  const failedIds = [];
 
-  for (const matchId of newMatchIds) {
+  await runPool(missingIds, concurrency, async matchId => {
     try {
       const matchText = await client.fetchMat(matchId);
       atomicWrite(path.join(outputDir, `match${matchId}.txt`), matchText);
       downloaded++;
-
-      const elapsed = (Date.now() - startTime) / 1000;
-      const rate = downloaded / elapsed;
-      const remaining = newMatchIds.length - downloaded;
-      const eta = Math.round(remaining / rate);
-      process.stdout.write(
-        `\r     ${downloaded}/${newMatchIds.length} (${errors} errors) - ETA: ${eta}s   `
-      );
     } catch (err) {
       errors++;
+      failedIds.push(matchId);
       console.error(`\n     Failed match ${matchId}: ${err.message}`);
     }
-  }
+    const done = downloaded + errors;
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = done / elapsed;
+    const eta = rate > 0 ? Math.round((missingIds.length - done) / rate) : 0;
+    process.stdout.write(
+      `\r     ${done}/${missingIds.length} (${errors} errors) - ETA: ${eta}s   `
+    );
+  });
 
   const totalTime = Math.round((Date.now() - startTime) / 1000);
   const total = existingIds.size + downloaded;
 
   const summary = [
-    `  New matches downloaded:  ${downloaded}`,
+    `  Matches downloaded:      ${downloaded}`,
     `  Total matches saved:     ${total}`,
   ];
   if (errors > 0) summary.push(`  Failed downloads:        ${errors}`);
   summary.push(`  Time:                    ${totalTime}s`);
   printBanner(log, 'SYNC COMPLETE!', summary);
+
+  if (failedIds.length > 0) {
+    const shown = failedIds.slice(0, 20).join(', ');
+    const more = failedIds.length > 20 ? `, +${failedIds.length - 20} more` : '';
+    log(`\n  ${failedIds.length} match(es) failed (often transient server 500s):`);
+    log(`    ${shown}${more}`);
+    log('  Re-run to retry — matches already saved are skipped.');
+  }
+
   printFooter(outputDir, log);
 
-  return { downloaded, errors, total, newMatchIds };
+  return { downloaded, errors, total, missingIds, failedIds };
 }
 
 async function main() {
@@ -160,6 +194,7 @@ async function main() {
       client,
       outputDir: CONFIG.outputDir,
       existingIds,
+      concurrency: CONFIG.concurrency,
     });
 
     // Open the matches folder if we actually downloaded something (Windows).

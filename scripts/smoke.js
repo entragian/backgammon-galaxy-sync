@@ -11,7 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { createClient, findNewMatches, RateLimitError } = require('../index');
+const { createClient, findNewMatches, findMissingMatches, RateLimitError } = require('../index');
 const { downloadNewMatches, getExistingMatchIds } = require('../sync');
 
 // Minimal fetch Response stand-in. `headers` mimics the WHATWG Headers.get().
@@ -136,7 +136,26 @@ async function testDiscovery() {
     'findNewMatches requires an isKnown predicate'
   );
 
-  console.log('  ok  discovery: findNewMatches early-stop + metadata + guard');
+  // findMissingMatches: full scan, NO early-stop. With only the newest known,
+  // findNewMatches yields nothing but findMissingMatches still finds the gaps.
+  const newestKnown = id => id === 100;
+  const viaNew = [];
+  for await (const a of findNewMatches(fakeClient, { isKnown: newestKnown })) viaNew.push(a.matchId);
+  assert.deepEqual(viaNew, [], 'findNewMatches stops immediately when the newest is known');
+
+  const viaMissing = [];
+  for await (const a of findMissingMatches(fakeClient, { isKnown: newestKnown })) viaMissing.push(a.matchId);
+  assert.deepEqual(viaMissing, [99, 98, 97], 'findMissingMatches scans past known to fill gaps');
+
+  await assert.rejects(
+    (async () => {
+      for await (const _ of findMissingMatches(fakeClient, {})) void _;
+    })(),
+    /isKnown/,
+    'findMissingMatches requires an isKnown predicate'
+  );
+
+  console.log('  ok  discovery: early-stop vs full-scan + metadata + guards');
 }
 
 async function testConsumer() {
@@ -165,19 +184,20 @@ async function testConsumer() {
       log: () => {},
     });
 
-    assert.deepEqual(result.newMatchIds, [100, 99], 'early-stop at first already-saved id (98)');
-    assert.equal(result.downloaded, 2, 'downloaded exactly the new ones');
+    assert.deepEqual(result.missingIds, [100, 99, 97], 'full scan finds the gap (97), not just the newest');
+    assert.equal(result.downloaded, 3, 'downloaded all missing, including the gap');
     assert.equal(result.errors, 0, 'no errors');
-    assert.ok(fs.existsSync(path.join(tmp, 'match100.txt')), 'wrote match100');
-    assert.ok(fs.existsSync(path.join(tmp, 'match99.txt')), 'wrote match99');
-    assert.ok(!fs.existsSync(path.join(tmp, 'match97.txt')), 'stopped before 97 (not written)');
+    assert.deepEqual(result.failedIds, [], 'no failed ids');
+    for (const id of [100, 99, 97]) {
+      assert.ok(fs.existsSync(path.join(tmp, `match${id}.txt`)), `wrote match${id}`);
+    }
     assert.equal(
       fs.readdirSync(tmp).filter(f => f.endsWith('.tmp')).length,
       0,
       'atomic write leaves no .tmp files behind'
     );
 
-    console.log('  ok  consumer: early-stop + atomic writes only new matches');
+    console.log('  ok  consumer: full resync fills gaps via concurrent pool');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -185,7 +205,7 @@ async function testConsumer() {
 
 function testExports() {
   const core = require('../index');
-  for (const name of ['createClient', 'findNewMatches', 'AuthError', 'HttpError', 'NetworkError', 'RateLimitError']) {
+  for (const name of ['createClient', 'findNewMatches', 'findMissingMatches', 'AuthError', 'HttpError', 'NetworkError', 'RateLimitError']) {
     assert.equal(typeof core[name], 'function', `core exports ${name}`);
   }
 

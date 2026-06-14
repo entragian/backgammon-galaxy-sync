@@ -64,3 +64,20 @@ fields.
   to capture the metadata sample.
 
 Implementation tracked in plan: `~/.claude/plans/okan-it-out-then-silly-taco.md`.
+
+## Addendum (2026-06-14): resync correctness + concurrency
+
+A real test-drive (1526 matches) revealed that the CLI's early-stop discovery was wrong for
+the bulk case: downloads go newest-first, ~18 matches 500'd mid-history (leaving gaps), and on
+restart `findNewMatches` saw the newest match on disk and stopped immediately → false "ALL UP
+TO DATE", stranding the gaps and any un-downloaded older matches.
+
+Changes:
+- Added `findMissingMatches(client, { isKnown })` — full-scan, no early stop — alongside
+  `findNewMatches` (kept as the fast incremental option). The CLI now uses `findMissingMatches`,
+  so re-runs resume interruptions and backfill failed-download gaps.
+- CLI downloads concurrently via a bounded pool (`CONFIG.concurrency = 4`); downloading stays in
+  the consumer (library remains I/O-free).
+- Failed match ids are collected and reported at the end with a "re-run to retry" hint
+  (chosen over a persistent skip-list).
+
