@@ -1,11 +1,34 @@
 {
   "name": "backgammon-galaxy-sync",
   "version": "1.0.0",
-  "description": "Download Backgammon Galaxy matches for ExtremeGammon analysis",
-  "main": "sync.js",
-  "bin": "sync.js",
+  "description": "Backgammon Galaxy API client + CLI to download matches for ExtremeGammon analysis",
+  "main": "./index.js",
+  "types": "./types/index.d.ts",
+  "bin": {
+    "backgammon-galaxy-sync": "sync.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./index.js"
+    },
+    "./auth": {
+      "types": "./types/lib/browser-auth.d.ts",
+      "default": "./lib/browser-auth.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "lib/",
+    "sync.js",
+    "types/",
+    "README.md"
+  ],
   "scripts": {
     "sync": "node sync.js",
+    "smoke": "node scripts/smoke.js",
+    "build:types": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build:types",
     "build": "pkg . --targets node18-win-x64 --output dist/BackgammonSync.exe"
   },
   "pkg": {
@@ -14,13 +37,21 @@
   },
   "keywords": [
     "backgammon",
-    "extremegammon"
+    "backgammon-galaxy",
+    "extremegammon",
+    "mat"
   ],
   "license": "MIT",
-  "dependencies": {
+  "peerDependencies": {
     "playwright": "^1.57.0"
   },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
+  },
   "devDependencies": {
-    "pkg": "^5.8.1"
+    "pkg": "^5.8.1",
+    "typescript": "^5.4.0"
   }
 }

@@ -3,3 +3,5 @@ matches/
 package-lock.json
 .session.json
 .claude/
+types/
+dist/
