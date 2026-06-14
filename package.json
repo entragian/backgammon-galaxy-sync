@@ -26,14 +26,10 @@
   ],
   "scripts": {
     "sync": "node sync.js",
+    "test": "node scripts/smoke.js",
     "smoke": "node scripts/smoke.js",
     "build:types": "tsc -p tsconfig.json",
-    "prepublishOnly": "npm run build:types",
-    "build": "pkg . --targets node18-win-x64 --output dist/BackgammonSync.exe"
-  },
-  "pkg": {
-    "assets": [],
-    "outputPath": "dist"
+    "prepublishOnly": "npm run build:types"
   },
   "keywords": [
     "backgammon",
@@ -51,7 +47,6 @@
     }
   },
   "devDependencies": {
-    "pkg": "^5.8.1",
     "typescript": "^5.4.0"
   }
 }

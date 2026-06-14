@@ -39,6 +39,21 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+:: Playwright is an OPTIONAL peer dependency, so "npm install" above skips it.
+:: The browser sign-in step in Sync Matches.bat needs it, so install it here.
+echo.
+echo Installing browser sign-in support (Playwright)...
+echo (This may take another minute)
+echo.
+call npm install playwright
+
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo Playwright install failed! Sign-in won't work without it.
+    pause
+    exit /b 1
+)
+
 echo.
 echo ========================================
 echo   Setup Complete!
