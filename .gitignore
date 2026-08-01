@@ -1,5 +1,11 @@
 node_modules/
 matches/
+# Credentials — .session.json below holds a live SSO session; these are a net for
+# anything similar that shows up later.
+.env
+.env.*
+*.pem
+*.key
 package-lock.json
 .session.json
 .claude/

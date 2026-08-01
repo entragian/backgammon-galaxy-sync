@@ -1,12 +1,13 @@
 # Backgammon Galaxy Sync
 
-A small library **and** CLI for [Backgammon Galaxy](https://play.backgammongalaxy.com):
+A small library **and** CLI for [Backgammon Galaxy](https://www.backgammongalaxy.com):
 
 - **Library** — a browser-free API client you can drop into your own Node app to pull match
   history and `.mat` data. Bring your own auth token, or use the optional browser sign-in
   add-on.
-- **CLI** — `node sync.js` downloads your new matches as `.txt` files for ExtremeGammon. It's
-  the worked example of the library.
+- **CLI** — `node sync.js` downloads your new matches as `.txt` files for ExtremeGammon, each
+  run into its own dated folder so you always know what's new, and tells you which matches
+  you've already imported. It's the worked example of the library.
 
 ---
 
@@ -46,14 +47,14 @@ function is the entire boundary — the core never knows *how* the token was obt
 to satisfy it:
 
 ```js
-// A) You already have a bg-app-token (no browser, no Playwright):
+// A) You already have a JWT_ACCESS token (no browser, no Playwright):
 const client = createClient({ getToken: async () => MY_TOKEN });
 
 // B) Human sign-in via the optional add-on (needs `npm i playwright`):
 const { createBrowserAuth } = require('backgammon-galaxy-sync/auth');
 const { getToken } = createBrowserAuth({
   sessionFile: './.session.json',
-  loginUrl: 'https://play.backgammongalaxy.com/',
+  loginUrl: 'https://www.backgammongalaxy.com/play',
 });
 const client = createClient({ getToken });
 ```
@@ -108,7 +109,7 @@ TypeScript types ship with the package (generated from JSDoc).
 1. **First time only**: double-click `SETUP.bat` (installs Node.js if needed, downloads
    dependencies).
 2. **To sync**: double-click `Sync Matches.bat` — opens a browser for login the first time,
-   downloads only new matches, and opens the `matches` folder when done.
+   downloads only new matches, and opens the folder holding them when done.
 
 ### From a terminal
 
@@ -124,10 +125,35 @@ several at a time, writing each as `matchN.txt` via an atomic write (no half-wri
 Ctrl-C). Matches that fail (occasional server-side 500s) are listed at the end; just re-run to
 retry them.
 
+Each run that downloads anything puts its matches in **its own dated folder** inside `matches`:
+
+```
+matches/
+  match10000001.txt        <- older downloads, before batch folders existed
+  2026-08-01/              <- everything one sync run downloaded
+    match10000002.txt
+  2026-08-01-2/            <- a second run the same day
+```
+
+A run that finds nothing new creates no folder at all. A match already saved anywhere under
+`matches` — root or any dated folder — is never downloaded again, so you can reorganize freely,
+with two limits: folders whose name starts with `.` or `$` are not scanned, and neither is
+anything more than 8 levels deep. The sync prints a note listing any folder it skipped, since
+matches inside one would otherwise be downloaded a second time.
+
 ### Importing to ExtremeGammon
 
 1. Open ExtremeGammon → **File > Import**
-2. Select the `.txt` files from the `matches` folder
+2. Open the dated folder the sync just created, press **Ctrl+A**, and import — everything in
+   there is new.
+
+The end of each run prints an **import status** readout. ExtremeGammon writes a `matchN.xg`
+next to every `matchN.txt` it imports, so the CLI can tell you exactly how many matches are
+still waiting to be imported and which folders they're in.
+
+Some matches are counted separately as **stubs**: a player resigned before the first dice roll,
+so the file has no moves in it. ExtremeGammon can't import those and never will — they're not
+outstanding work, and they're listed apart so they don't look like a backlog that won't clear.
 
 ---
 
